@@ -24,8 +24,9 @@ import numpy as np
 # -----------------------------------------
 # 設定（必要に応じて調整）
 # -----------------------------------------
-EXPECTED_COLS = 225   # X 方向点数（1タイル）
-EXPECTED_ROWS = 150   # Y 方向点数（1タイル）
+# タイルサイズは最初のXMLから自動取得する
+EXPECTED_COLS = None   # X 方向点数（1タイル） - 自動取得
+EXPECTED_ROWS = None   # Y 方向点数（1タイル） - 自動取得
 
 # tupleList の走査順が想定と逆だった場合に備えた強制フリップ
 FORCE_FLIP_Y = False
@@ -37,12 +38,14 @@ ROUND_DECIMALS = 10   # 小数10桁程度で丸め
 MISSING_TOKENS = {"", "-9999", "-9999.0", "-9999.00"}
 
 # -----------------------------------------
-def parse_tile(xml_path):
+def parse_tile(xml_path, expected_cols=None, expected_rows=None):
     """
     1タイルXMLから:
       - lat_min, lon_min, lat_max, lon_max（float）
-      - data2d: (rows, cols) = (EXPECTED_ROWS, EXPECTED_COLS) の np.float32
+      - data2d: (rows, cols) の np.float32
+      - cols, rows (実際のサイズ)
     を返す。失敗時は None を返す。
+    expected_cols/rowsが指定されていない場合は、XMLから取得したサイズをそのまま使用。
     """
     try:
         # XMLファイルの読み込み（文字化け対策）
@@ -72,9 +75,11 @@ def parse_tile(xml_path):
         cols = high_x - low_x + 1
         rows = high_y - low_y + 1
 
-        if cols != EXPECTED_COLS or rows != EXPECTED_ROWS:
-            print(f"[WARN] Grid size mismatch: {os.path.basename(xml_path)} -> ({rows},{cols})")
-            return None
+        # expected_cols/rowsが指定されている場合のみサイズチェック
+        if expected_cols is not None and expected_rows is not None:
+            if cols != expected_cols or rows != expected_rows:
+                print(f"[WARN] Grid size mismatch: {os.path.basename(xml_path)} -> ({rows},{cols}), expected ({expected_rows},{expected_cols})")
+                return None
 
         # 標高値の抽出（gml:tupleList）
         tlist = root.find(".//gml:rangeSet/gml:DataBlock/gml:tupleList", ns)
@@ -152,9 +157,26 @@ def main():
 
     print(f"[INFO] XML files: {len(xmls)}")
 
+    # 最初のXMLからタイルサイズを自動取得
+    first_tile = None
+    for x in xmls:
+        t = parse_tile(x)  # まず最初の1つを解析してサイズを決定
+        if t is not None:
+            first_tile = t
+            break
+    
+    if first_tile is None:
+        print("[ERROR] No valid XML files found for size detection.")
+        sys.exit(1)
+    
+    # 標準タイルサイズを設定
+    standard_cols = first_tile["cols"]
+    standard_rows = first_tile["rows"]
+    print(f"[INFO] Standard tile size detected: ({standard_rows}, {standard_cols})")
+
     tiles = []
     for x in xmls:
-        t = parse_tile(x)
+        t = parse_tile(x, standard_cols, standard_rows)
         if t is not None:
             tiles.append(t)
 
@@ -174,10 +196,10 @@ def main():
 
     Ty = len(row_bands)
     Tx = len(col_bands)
-    print(f"[INFO] Tiling grid (Tx,Ty) = ({Tx},{Ty})  -> output shape = ({Ty*EXPECTED_ROWS}, {Tx*EXPECTED_COLS})")
+    print(f"[INFO] Tiling grid (Tx,Ty) = ({Tx},{Ty})  -> output shape = ({Ty*standard_rows}, {Tx*standard_cols})")
 
-    H = Ty * EXPECTED_ROWS
-    W = Tx * EXPECTED_COLS
+    H = Ty * standard_rows
+    W = Tx * standard_cols
     out = np.full((H, W), np.nan, dtype=np.float32)
 
     # タイルを貼り込む
@@ -194,11 +216,11 @@ def main():
             r = min(range(Ty), key=lambda i: abs(row_bands[i] - r_key))
             c = min(range(Tx), key=lambda i: abs(col_bands[i] - c_key))
 
-        y0, y1 = r * EXPECTED_ROWS, (r + 1) * EXPECTED_ROWS
-        x0, x1 = c * EXPECTED_COLS, (c + 1) * EXPECTED_COLS
+        y0, y1 = r * standard_rows, (r + 1) * standard_rows
+        x0, x1 = c * standard_cols, (c + 1) * standard_cols
 
         tile = t["data"]
-        if tile.shape != (EXPECTED_ROWS, EXPECTED_COLS):
+        if tile.shape != (standard_rows, standard_cols):
             print(f"[WARN] Skip irregular tile size: {os.path.basename(t['path'])}")
             continue
 
@@ -214,11 +236,15 @@ def main():
         f.write(f"grid: Tx={Tx}, Ty={Ty}\n")
         f.write(f"shape: H={H}, W={W}\n")
 
+    # フォルダ名を取得してファイル名に使用
+    folder_name = os.path.basename(os.path.abspath(in_dir))
+    
     # npy保存（任意）
-    np.save(os.path.join(in_dir, "dem_merged.npy"), out)
+    npy_path = os.path.join(in_dir, f"{folder_name}.npy")
+    np.save(npy_path, out)
 
     # OpenEXRで保存（単チャンネルR, float32）
-    exr_path = os.path.join(in_dir, "dem_merged.exr")
+    exr_path = os.path.join(in_dir, f"{folder_name}.exr")
     save_exr_float32_R(exr_path, out)
     print(f"[INFO] saved EXR: {exr_path}")
 

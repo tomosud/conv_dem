@@ -34,6 +34,6 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Completed: %TARGET_DIR%\dem_merged.exr
+echo Completed: Check output files in %TARGET_DIR%
 pause
 endlocal
