@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(D:KTNSourceAssetsToolsPythonenvPython311.4python.exe -c \"import numpy; print(numpy.__version__); print(numpy.__file__)\")",
+      "Bash(\"D:\\KTN\\SourceAssets\\Tools\\Python\\env\\Python311.4\\python.exe\" -c \"import numpy; print(numpy.__version__); print(numpy.__file__)\")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

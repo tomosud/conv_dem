@@ -1,0 +1,13 @@
+# -*- coding: utf-8 -*-
+# DEM Stitch Tool Requirements
+# 文字化けを防ぐため、UTF-8エンコーディングで記述
+
+# 基本的な数値計算ライブラリ
+numpy>=1.20.0
+
+# OpenEXRファイル読み書き用ライブラリ
+# 注意: OpenEXRモジュールはPyOpenEXRパッケージとしてインストールされる
+OpenEXR>=1.3.9
+
+# 文字エンコーディング検出（日本語ファイル名対応）
+chardet>=4.0.0

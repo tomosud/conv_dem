@@ -24,36 +24,41 @@ numpy pandasなども使用可能。
 
 例：最終の完成サイズが 2250 × 1500（= 10×10 タイル）になるケースを含む。
 
-Python 実行ファイル：
-D:\KTN\SourceAssets\Tools\Python\env\Python311.4\python.exe
+## 2025-08-13 更新: 仮想環境対応
 
-追加モジュールパス（相対パスで通す）：
-.\script\tom_oda\module\3.11
-※「このフォルダ」＝ BAT が置かれているフォルダ（＝ py も同階層に置く想定）
+**変更理由**: numpy ライブラリの破損エラー対応のため、仮想環境を使用する方式に変更
 
-使用モジュール：OpenEXR, Imath, numpy, pandas（pandasはログ集計等に使用可、必須ではない）
+**Python 実行方式**:
+- 仮想環境: .\venv\ （ローカル仮想環境）
+- ベースPython: D:\KTN\SourceAssets\Tools\Python\env\Python311.4\python.exe
 
-生成物（ファイル配置）
-cpp
-コピーする
-編集する
-<任意の作業フォルダ>\
-  dem_stitch.bat                ← ドロップ用BAT
-  dem_stitch.py                 ← 本体スクリプト
-  script\
-    tom_oda\
-      module\
-        3.11\                  ← 追加モジュール群（相対パスで PYTHONPATH に通す）
-動作フロー
-ユーザーが XML群の入ったフォルダを dem_stitch.bat にドラッグ＆ドロップ。
+**追加ファイル**:
+- requirements.txt: 必要ライブラリの定義
+- setup.bat: 仮想環境作成とライブラリインストール
 
-BAT が
+**使用モジュール**: numpy, OpenEXR, Imath, chardet（文字化け対策）
 
-相対の .\script\tom_oda\module\3.11 を PYTHONPATH に追加
+**セットアップ手順**:
+1. setup.bat を実行（初回のみ）
+2. XMLフォルダを stitch.bat にドラッグ&ドロップ
 
-指定の Python（3.11.4）で dem_stitch.py を起動
-
-引数でドロップフォルダの絶対パスを渡す
+**ファイル配置**:
+```
+<作業フォルダ>\
+  setup.bat                    ← 初回セットアップ用
+  stitch.bat                   ← XMLフォルダドロップ用BAT
+  dem_stitch.py                ← 本体スクリプト
+  requirements.txt             ← ライブラリ定義
+  venv\                        ← 仮想環境（setup.bat実行後に作成）
+    Scripts\
+      python.exe               ← 仮想環境のPython
+    Lib\
+      site-packages\           ← インストール済みライブラリ
+```
+**動作フロー**:
+1. ユーザーが XML群の入ったフォルダを stitch.bat にドラッグ＆ドロップ
+2. stitch.bat が仮想環境のPython（.\venv\Scripts\python.exe）で dem_stitch.py を起動
+3. 引数でドロップフォルダの絶対パスを渡す
 
 dem_stitch.py が以下を実施：
 
@@ -100,9 +105,11 @@ orientation（上下反転の可能性）：仕様上、tupleList の走査順�
 
 タイル座標のクラスタ閾値：緯度・経度は微小な浮動小数のズレがあり得るため、丸め（例：1e-9～1e-7オーダー）を使って列挙→ユニーク化する。
 
-使い方（ユーザー向け）
-dem_stitch.bat と dem_stitch.py を同じフォルダに置く。
+**使い方（ユーザー向け）**:
+1. 初回のみ: setup.bat を実行して仮想環境をセットアップ
+2. XML群の入ったフォルダを stitch.bat にドラッグ＆ドロップ
+3. 完了後、ドロップしたフォルダに dem_merged.exr が生成される
 
-XML群の入ったフォルダを BAT にドラッグ＆ドロップ。
-
-完了後、ドロップしたフォルダに dem_merged.exr が生成される。
+**トラブルシューティング**:
+- "仮想環境が見つかりません" エラー: setup.bat を先に実行してください
+- OpenEXRエラー: requirements.txt の内容を確認し、再度 setup.bat を実行してください

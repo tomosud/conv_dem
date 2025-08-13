@@ -10,8 +10,16 @@ import glob
 import math
 import xml.etree.ElementTree as ET
 
+# OpenEXRを先にimportしてから、numpyをimport
+try:
+    import OpenEXR
+    import Imath
+except ImportError as e:
+    print(f"[ERROR] OpenEXRライブラリのimportに失敗しました: {e}")
+    print("[INFO] 'pip install OpenEXR' または 'pip install PyOpenEXR' を試してください。")
+    sys.exit(1)
+
 import numpy as np
-import OpenEXR, Imath
 
 # -----------------------------------------
 # 設定（必要に応じて調整）
@@ -37,7 +45,9 @@ def parse_tile(xml_path):
     を返す。失敗時は None を返す。
     """
     try:
-        tree = ET.parse(xml_path)
+        # XMLファイルの読み込み（文字化け対策）
+        with open(xml_path, 'r', encoding='utf-8') as f:
+            tree = ET.parse(f)
         root = tree.getroot()
         ns = {
             "gml": "http://www.opengis.net/gml/3.2",
