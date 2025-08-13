@@ -119,10 +119,49 @@ def parse_tile(xml_path, expected_cols=None, expected_rows=None):
 
         vals = np.array(vals, dtype=np.float32)
 
-        # 行優先で reshape（x が速く、次いで y が進む想定）
-        if vals.size != rows * cols:
-            print(f"[WARN] Value count mismatch: {os.path.basename(xml_path)} -> {vals.size} values")
-            return None
+        # GridFunctionのstartPointを確認（部分データの場合）
+        start_point = None
+        grid_func = root.find(".//gml:coverageFunction/gml:GridFunction/gml:startPoint", ns)
+        if grid_func is not None:
+            start_coords = grid_func.text.strip().split()
+            start_x, start_y = int(start_coords[0]), int(start_coords[1])
+            start_point = (start_x, start_y)
+            print(f"[INFO] StartPoint detected: {os.path.basename(xml_path)} -> ({start_x}, {start_y})")
+
+        expected_size = rows * cols
+        
+        # 値の数が期待値と異なる場合の処理
+        if vals.size != expected_size:
+            print(f"[INFO] Partial data detected: {os.path.basename(xml_path)} -> {vals.size}/{expected_size} values")
+            
+            # 不足分を0で埋めた配列を作成
+            full_vals = np.zeros(expected_size, dtype=np.float32)
+            
+            if start_point is not None:
+                # startPointが指定されている場合の配置計算
+                start_x, start_y = start_point
+                
+                # sequenceRule "+x-y" に従って配置
+                val_idx = 0
+                for y in range(start_y, rows):
+                    for x in range(start_x, cols):
+                        if val_idx < vals.size:
+                            linear_idx = y * cols + x
+                            if linear_idx < expected_size:
+                                full_vals[linear_idx] = vals[val_idx]
+                            val_idx += 1
+                        else:
+                            break
+                    if val_idx >= vals.size:
+                        break
+                    # 次の行は x=0 から開始
+                    start_x = 0
+            else:
+                # startPointが無い場合は先頭から配置
+                copy_size = min(vals.size, expected_size)
+                full_vals[:copy_size] = vals[:copy_size]
+            
+            vals = full_vals
 
         data2d = vals.reshape((rows, cols))
 
@@ -162,58 +201,71 @@ def interpolate_small_holes(data):
     result = data.copy()
     H, W = result.shape
     
+    total_missing = np.sum(result == 0.0)
+    print(f"[INFO] Total missing pixels: {total_missing}")
+    
+    # 欠損ピクセルが多すぎる場合は処理をスキップ
+    if total_missing > 1000000:  # 100万ピクセル以上
+        print(f"[INFO] Too many missing pixels ({total_missing}), skipping interpolation")
+        return result
+    
     # 30回の反復処理
     for iteration in range(30):
-        # 欠損値位置を取得
-        missing_indices = np.where(result == 0.0)
-        missing_count = len(missing_indices[0])
-        
-        if missing_count == 0:
-            print(f"[INFO] No missing values remaining after iteration {iteration + 1}")
-            break
-        
-        print(f"[INFO] Iteration {iteration + 1}/30: Processing {missing_count} missing pixels")
-        
-        interpolated_this_round = 0
-        
-        # 各欠損ピクセルを処理
-        for idx in range(missing_count):
-            y, x = missing_indices[0][idx], missing_indices[1][idx]
+        try:
+            # 欠損値位置を取得
+            missing_indices = np.where(result == 0.0)
+            missing_count = len(missing_indices[0])
             
-            if result[y, x] != 0.0:  # 既に補間済みの場合はスキップ
-                continue
+            if missing_count == 0:
+                print(f"[INFO] No missing values remaining after iteration {iteration + 1}")
+                break
             
-            # ランダムに周囲を探索して2つの有効値を見つける
-            valid_values = []
-            search_radius = 5
-            max_attempts = 20
+            print(f"[INFO] Iteration {iteration + 1}/30: Processing {missing_count} missing pixels")
             
-            for _ in range(max_attempts):
-                # ランダムなオフセットを生成
-                dy = random.randint(-search_radius, search_radius)
-                dx = random.randint(-search_radius, search_radius)
+            interpolated_this_round = 0
+            
+            # 各欠損ピクセルを処理
+            for idx in range(missing_count):
+                y, x = missing_indices[0][idx], missing_indices[1][idx]
                 
-                ny, nx = y + dy, x + dx
+                if result[y, x] != 0.0:  # 既に補間済みの場合はスキップ
+                    continue
                 
-                # 境界チェック
-                if 0 <= ny < H and 0 <= nx < W:
-                    value = result[ny, nx]
-                    if value != 0.0:  # 有効値
-                        valid_values.append(value)
-                        
-                        # 2つの有効値が見つかったら終了
-                        if len(valid_values) >= 2:
-                            break
+                # ランダムに周囲を探索して2つの有効値を見つける
+                valid_values = []
+                search_radius = 5
+                max_attempts = 20
+                
+                for _ in range(max_attempts):
+                    # ランダムなオフセットを生成
+                    dy = random.randint(-search_radius, search_radius)
+                    dx = random.randint(-search_radius, search_radius)
+                    
+                    ny, nx = y + dy, x + dx
+                    
+                    # 境界チェック
+                    if 0 <= ny < H and 0 <= nx < W:
+                        value = result[ny, nx]
+                        if value != 0.0:  # 有効値
+                            valid_values.append(value)
+                            
+                            # 2つの有効値が見つかったら終了
+                            if len(valid_values) >= 2:
+                                break
+                
+                # 2つ以上の有効値が見つかった場合は平均で補間
+                if len(valid_values) >= 2:
+                    result[y, x] = np.mean(valid_values)
+                    interpolated_this_round += 1
             
-            # 2つ以上の有効値が見つかった場合は平均で補間
-            if len(valid_values) >= 2:
-                result[y, x] = np.mean(valid_values)
-                interpolated_this_round += 1
-        
-        print(f"[INFO] Iteration {iteration + 1}: Interpolated {interpolated_this_round} pixels")
-        
-        # 補間できるピクセルがなくなったら終了
-        if interpolated_this_round == 0:
+            print(f"[INFO] Iteration {iteration + 1}: Interpolated {interpolated_this_round} pixels")
+            
+            # 補間できるピクセルがなくなったら終了
+            if interpolated_this_round == 0:
+                break
+                
+        except Exception as e:
+            print(f"[WARN] Error in iteration {iteration + 1}: {e}")
             break
     
     # 残った欠損値を0で埋める（実質的には既に0なので処理不要）
@@ -312,6 +364,9 @@ def main():
 
     print(f"[INFO] placed tiles: {placed}/{len(tiles)}")
 
+    # 補間前の欠損マスクを作成（0=欠損、1=有効データ）
+    original_mask = (out != 0.0).astype(np.float32)
+
     # 高速欠損値補間処理
     try:
         out = interpolate_small_holes(out)
@@ -336,6 +391,34 @@ def main():
     exr_path = os.path.join(in_dir, f"{folder_name}.exr")
     save_exr_float32_R(exr_path, out)
     print(f"[INFO] saved EXR: {exr_path}")
+    
+    # 補間前の欠損マスクを別ファイルで保存
+    mask_exr_path = os.path.join(in_dir, f"{folder_name}_mask.exr")
+    save_exr_float32_R(mask_exr_path, original_mask)
+    print(f"[INFO] saved mask EXR: {mask_exr_path}")
+
+def save_exr_float32_RG(path, dem_data, mask_data):
+    """
+    2チャンネル EXR として保存
+    dem_data: (H,W) float32 - DEMデータ（Rチャンネル）
+    mask_data: (H,W) float32 - 欠損マスク（Gチャンネル、0=欠損、1=有効）
+    """
+    H, W = dem_data.shape
+    header = OpenEXR.Header(W, H)
+    # ピクセルタイプ（32-bit float）
+    pt = Imath.PixelType(Imath.PixelType.FLOAT)
+
+    # NumPy -> bytes
+    chan_R = dem_data.astype(np.float32).tobytes()
+    chan_G = mask_data.astype(np.float32).tobytes()
+
+    header['channels'] = {
+        'R': Imath.Channel(pt),  # DEMデータ
+        'G': Imath.Channel(pt)   # 欠損マスク
+    }
+    exr = OpenEXR.OutputFile(path, header)
+    exr.writePixels({'R': chan_R, 'G': chan_G})
+    exr.close()
 
 def save_exr_float32_R(path, img2d):
     """
