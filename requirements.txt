@@ -10,3 +10,5 @@ OpenEXR>=1.3.9
 
 # Character encoding detection for Japanese filenames
 chardet>=4.0.0
+
+# Note: scipy removed - using fast random sampling interpolation instead

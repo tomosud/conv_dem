@@ -40,6 +40,10 @@ MISSING_TOKENS = {"", "-9999", "-9999.0", "-9999.00"}
 # 欠損値の数値判定閾値（-9990以下は欠損値とみなす）
 MISSING_THRESHOLD = -9990
 
+# 欠損値補間の設定
+MAX_HOLE_SIZE = 20  # 補間する最大穴サイズ（ピクセル）
+INTERPOLATION_KERNEL_SIZE = 5  # 補間時の周辺参照サイズ
+
 # -----------------------------------------
 def parse_tile(xml_path, expected_cols=None, expected_rows=None):
     """
@@ -147,6 +151,77 @@ def unique_sorted_with_round(values, reverse=False):
     # 丸め後の値→元値の代表 という対応は不要（行列インデックス化だけに使う）
     return uniq
 
+def interpolate_small_holes(data):
+    """
+    高速な欠損値補間：ランダムサンプリングによる周囲探索
+    """
+    import random
+    
+    print("[INFO] Starting fast hole interpolation...")
+    
+    result = data.copy()
+    H, W = result.shape
+    
+    # 30回の反復処理
+    for iteration in range(30):
+        # 欠損値位置を取得
+        missing_indices = np.where(result == 0.0)
+        missing_count = len(missing_indices[0])
+        
+        if missing_count == 0:
+            print(f"[INFO] No missing values remaining after iteration {iteration + 1}")
+            break
+        
+        print(f"[INFO] Iteration {iteration + 1}/30: Processing {missing_count} missing pixels")
+        
+        interpolated_this_round = 0
+        
+        # 各欠損ピクセルを処理
+        for idx in range(missing_count):
+            y, x = missing_indices[0][idx], missing_indices[1][idx]
+            
+            if result[y, x] != 0.0:  # 既に補間済みの場合はスキップ
+                continue
+            
+            # ランダムに周囲を探索して2つの有効値を見つける
+            valid_values = []
+            search_radius = 5
+            max_attempts = 20
+            
+            for _ in range(max_attempts):
+                # ランダムなオフセットを生成
+                dy = random.randint(-search_radius, search_radius)
+                dx = random.randint(-search_radius, search_radius)
+                
+                ny, nx = y + dy, x + dx
+                
+                # 境界チェック
+                if 0 <= ny < H and 0 <= nx < W:
+                    value = result[ny, nx]
+                    if value != 0.0:  # 有効値
+                        valid_values.append(value)
+                        
+                        # 2つの有効値が見つかったら終了
+                        if len(valid_values) >= 2:
+                            break
+            
+            # 2つ以上の有効値が見つかった場合は平均で補間
+            if len(valid_values) >= 2:
+                result[y, x] = np.mean(valid_values)
+                interpolated_this_round += 1
+        
+        print(f"[INFO] Iteration {iteration + 1}: Interpolated {interpolated_this_round} pixels")
+        
+        # 補間できるピクセルがなくなったら終了
+        if interpolated_this_round == 0:
+            break
+    
+    # 残った欠損値を0で埋める（実質的には既に0なので処理不要）
+    final_missing = np.sum(result == 0.0)
+    print(f"[INFO] Fast interpolation completed. Remaining missing pixels: {final_missing}")
+    
+    return result
+
 def main():
     if len(sys.argv) < 2:
         print("[ERROR] 入力フォルダパスがありません。BATにXMLフォルダをドロップしてください。")
@@ -236,6 +311,12 @@ def main():
         placed += 1
 
     print(f"[INFO] placed tiles: {placed}/{len(tiles)}")
+
+    # 高速欠損値補間処理
+    try:
+        out = interpolate_small_holes(out)
+    except Exception as e:
+        print(f"[WARN] Hole interpolation failed: {e}")
 
     # 形状ログ
     with open(os.path.join(in_dir, "dem_merged_shape.txt"), "w", encoding="utf-8") as f:
