@@ -6,34 +6,34 @@ REM === このBATと同じフォルダを基準に相対パスを解決 ===
 set SCRIPT_DIR=%~dp0
 set SCRIPT_DIR=%SCRIPT_DIR:~0,-1%
 
-REM === 仮想環境のPython実行ファイル ===
+REM === Virtual environment Python ===
 set VENV_PYTHON=%SCRIPT_DIR%\venv\Scripts\python.exe
 
-REM === 仮想環境の存在確認 ===
+REM === Check virtual environment ===
 if not exist "%VENV_PYTHON%" (
-    echo [ERROR] 仮想環境が見つかりません。先に setup.bat を実行してください。
+    echo [ERROR] Virtual environment not found. Run setup.bat first.
     pause
     exit /b 1
 )
 
-REM === 引数チェック（ドラッグ＆ドロップでフォルダが渡される想定）===
+REM === Check arguments (folder drag and drop) ===
 if "%~1"=="" (
-    echo [ERROR] フォルダをこのBATにドラッグ＆ドロップしてください。
+    echo [ERROR] Drag and drop XML folder to this BAT file.
     pause
     exit /b 1
 )
 
-REM === ドロップされたパスを取得 ===
+REM === Get dropped path ===
 set TARGET_DIR=%~1
 
-REM === 実行 ===
+REM === Execute ===
 "%VENV_PYTHON%" -X utf8 "%SCRIPT_DIR%\dem_stitch.py" "%TARGET_DIR%"
 if errorlevel 1 (
-    echo [ERROR] dem_stitch.py 実行でエラーが発生しました。
+    echo [ERROR] dem_stitch.py execution failed.
     pause
     exit /b 1
 )
 
-echo 完了: %TARGET_DIR%\dem_merged.exr
+echo Completed: %TARGET_DIR%\dem_merged.exr
 pause
 endlocal

@@ -3,60 +3,60 @@ chcp 65001 >nul
 setlocal
 
 REM ========================================
-REM DEM Stitch Tool - 仮想環境セットアップ
+REM DEM Stitch Tool - Virtual Environment Setup
 REM ========================================
 
-echo [INFO] DEM Stitch Tool の仮想環境をセットアップします...
+echo [INFO] DEM Stitch Tool virtual environment setup...
 
-REM === このBATと同じフォルダを基準に相対パスを解決 ===
+REM === Script directory ===
 set SCRIPT_DIR=%~dp0
 set SCRIPT_DIR=%SCRIPT_DIR:~0,-1%
 
-REM === 仮想環境ディレクトリ ===
+REM === Virtual environment directory ===
 set VENV_DIR=%SCRIPT_DIR%\venv
 
-REM === Python実行ファイル（システムのPython3.11を使用） ===
+REM === Python executable (system Python 3.11) ===
 set PY_EXE=D:\KTN\SourceAssets\Tools\Python\env\Python311.4\python.exe
 
-REM === Python実行ファイルの存在確認 ===
+REM === Check Python executable ===
 if not exist "%PY_EXE%" (
-    echo [ERROR] Python実行ファイルが見つかりません: %PY_EXE%
+    echo [ERROR] Python executable not found: %PY_EXE%
     pause
     exit /b 1
 )
 
-REM === 仮想環境の作成 ===
-echo [INFO] 仮想環境を作成中... (%VENV_DIR%)
+REM === Create virtual environment ===
+echo [INFO] Creating virtual environment... (%VENV_DIR%)
 "%PY_EXE%" -m venv "%VENV_DIR%"
 if errorlevel 1 (
-    echo [ERROR] 仮想環境の作成に失敗しました。
+    echo [ERROR] Failed to create virtual environment.
     pause
     exit /b 1
 )
 
-REM === 仮想環境のPythonパス ===
+REM === Virtual environment Python path ===
 set VENV_PYTHON=%VENV_DIR%\Scripts\python.exe
 
-REM === pipのアップグレード ===
-echo [INFO] pipをアップグレード中...
+REM === Upgrade pip ===
+echo [INFO] Upgrading pip...
 "%VENV_PYTHON%" -m pip install --upgrade pip
 if errorlevel 1 (
-    echo [WARN] pipのアップグレードに失敗しましたが、続行します。
+    echo [WARN] Failed to upgrade pip, but continuing.
 )
 
-REM === 必要なライブラリをインストール ===
-echo [INFO] 必要なライブラリをインストール中...
+REM === Install required libraries ===
+echo [INFO] Installing required libraries...
 "%VENV_PYTHON%" -m pip install -r "%SCRIPT_DIR%\requirements.txt"
 if errorlevel 1 (
-    echo [ERROR] ライブラリのインストールに失敗しました。
+    echo [ERROR] Failed to install libraries.
     pause
     exit /b 1
 )
 
 echo.
-echo [SUCCESS] セットアップが完了しました！
-echo [INFO] 仮想環境: %VENV_DIR%
-echo [INFO] 使用方法: XMLフォルダを stitch.bat にドラッグ&ドロップしてください。
+echo [SUCCESS] Setup completed!
+echo [INFO] Virtual environment: %VENV_DIR%
+echo [INFO] Usage: Drag XML folder to stitch.bat
 echo.
 pause
 endlocal
