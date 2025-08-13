@@ -34,8 +34,11 @@ FORCE_FLIP_Y = False
 # 緯度・経度クラスタリングの丸め（同一行/列の判断用）
 ROUND_DECIMALS = 10   # 小数10桁程度で丸め
 
-# 欠損値文字列
+# 欠損値文字列（従来の-9999パターン）
 MISSING_TOKENS = {"", "-9999", "-9999.0", "-9999.00"}
+
+# 欠損値の数値判定閾値（-9990以下は欠損値とみなす）
+MISSING_THRESHOLD = -9990
 
 # -----------------------------------------
 def parse_tile(xml_path, expected_cols=None, expected_rows=None):
@@ -98,12 +101,17 @@ def parse_tile(xml_path, expected_cols=None, expected_rows=None):
                 token = parts[-1]
 
             if token in MISSING_TOKENS:
-                vals.append(np.nan)
+                vals.append(0.0)
             else:
                 try:
-                    vals.append(float(token))
+                    val = float(token)
+                    # -9990以下は欠損値として0に変換
+                    if val <= MISSING_THRESHOLD:
+                        vals.append(0.0)
+                    else:
+                        vals.append(val)
                 except:
-                    vals.append(np.nan)
+                    vals.append(0.0)
 
         vals = np.array(vals, dtype=np.float32)
 
@@ -200,7 +208,7 @@ def main():
 
     H = Ty * standard_rows
     W = Tx * standard_cols
-    out = np.full((H, W), np.nan, dtype=np.float32)
+    out = np.full((H, W), 0.0, dtype=np.float32)
 
     # タイルを貼り込む
     placed = 0
