@@ -387,15 +387,47 @@ def main():
     npy_path = os.path.join(in_dir, f"{folder_name}.npy")
     np.save(npy_path, out)
 
-    # OpenEXRで保存（単チャンネルR, float32）
+    # 緯度経度範囲を全体から計算
+    all_lat_min = min(t["lat_min"] for t in tiles)
+    all_lat_max = max(t["lat_max"] for t in tiles)
+    all_lon_min = min(t["lon_min"] for t in tiles)
+    all_lon_max = max(t["lon_max"] for t in tiles)
+    
+    # スケール係数を計算
+    scale_x = compute_scale_x_from_latlon(all_lat_min, all_lat_max, all_lon_min, all_lon_max, H, W)
+    print(f"[INFO] Computed scale_x = {scale_x:.6f}")
+    
+    # スケール係数の逆数を使用（1.0/scale_x）
+    corrected_scale_x = 1.0 / scale_x
+    print(f"[INFO] Corrected scale_x (1.0/scale_x) = {corrected_scale_x:.6f}")
+    
+    # リサイズ後の横幅を計算
+    new_w = max(1, int(round(W * corrected_scale_x)))
+    print(f"[INFO] Resizing width from {W} to {new_w}")
+
+    # OpenEXRで保存（リサイズ前）
     exr_path = os.path.join(in_dir, f"{folder_name}.exr")
     save_exr_float32_R(exr_path, out)
     print(f"[INFO] saved EXR: {exr_path}")
     
-    # 補間前の欠損マスクを別ファイルで保存
+    # 補間前の欠損マスクを別ファイルで保存（リサイズ前）
     mask_exr_path = os.path.join(in_dir, f"{folder_name}_mask.exr")
     save_exr_float32_R(mask_exr_path, original_mask)
     print(f"[INFO] saved mask EXR: {mask_exr_path}")
+    
+    # リサイズ処理
+    out_resized = resize_width_linear(out, new_w)
+    original_mask_resized = resize_width_linear(original_mask, new_w)
+    
+    # OpenEXRで保存（リサイズ後）
+    exr_resized_path = os.path.join(in_dir, f"{folder_name}_resized.exr")
+    save_exr_float32_R(exr_resized_path, out_resized)
+    print(f"[INFO] saved resized EXR: {exr_resized_path}")
+    
+    # 補間前の欠損マスクを別ファイルで保存（リサイズ後）
+    mask_resized_exr_path = os.path.join(in_dir, f"{folder_name}_mask_resized.exr")
+    save_exr_float32_R(mask_resized_exr_path, original_mask_resized)
+    print(f"[INFO] saved resized mask EXR: {mask_resized_exr_path}")
 
 def save_exr_float32_RG(path, dem_data, mask_data):
     """
@@ -419,6 +451,35 @@ def save_exr_float32_RG(path, dem_data, mask_data):
     exr = OpenEXR.OutputFile(path, header)
     exr.writePixels({'R': chan_R, 'G': chan_G})
     exr.close()
+
+def compute_scale_x_from_latlon(lat_min, lat_max, lon_min, lon_max, rows, cols):
+    """
+    緯度経度範囲から横方向のスケール係数を計算
+    縦解像度はそのまま、横を拡大してアスペクト比を補正
+    """
+    lat_span = lat_max - lat_min
+    lon_span = lon_max - lon_min
+    dlat = lat_span / rows
+    dlon = lon_span / cols
+    phi = 0.5 * (lat_min + lat_max)  # 中央緯度
+    # 横方向のみ拡大する係数（縦=1.0）
+    scale_x = (dlat / dlon) * (1.0 / math.cos(math.radians(phi)))
+    return scale_x
+
+def resize_width_linear(img, new_w):
+    """
+    画像の横幅のみをリニア補間でリサイズ
+    """
+    H, W = img.shape
+    if new_w == W:
+        return img.copy()
+    
+    x_old = np.linspace(0.0, 1.0, W, endpoint=True)
+    x_new = np.linspace(0.0, 1.0, new_w, endpoint=True)
+    out = np.empty((H, new_w), dtype=img.dtype)
+    for y in range(H):
+        out[y] = np.interp(x_new, x_old, img[y])
+    return out
 
 def save_exr_float32_R(path, img2d):
     """
