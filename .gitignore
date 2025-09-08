@@ -180,3 +180,4 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 /sample
+viewer/FG-GML-523506-DEM1A-20250606_resized.exr
