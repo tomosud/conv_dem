@@ -70,17 +70,12 @@ EXRハイトマップビュワーです。EXRファイルをドラッグ＆ド�
 
 ### 使い方
 
-#### 1. ローカル開発サーバーの起動
+#### 1. Pageを開く
 
-```bash
-# Python 3を使用
-python server.py
+ブラウザで `https://tomosud.github.io/conv_dem/viewer/` にアクセス
 
-# または
-python -m http.server 8000
-```
+<img width="1495" height="738" alt="image" src="https://github.com/user-attachments/assets/be01063a-31ed-4c1d-8026-ffc335e02054" />
 
-ブラウザで `http://localhost:8000` にアクセス
 
 #### 2. EXRファイルの読み込み
 
