@@ -2,6 +2,8 @@
 
 国土地理院のDEMデータをOpenEXR形式に変換し、ブラウザで3D可視化するツールセット
 
+**[https://service.gsi.go.jp/kiban/app/](https://service.gsi.go.jp/kiban/app/)**
+
 ---
 
 ## 🌐 EXR Heightmap Viewer
@@ -41,10 +43,11 @@
    setup.bat を実行
    ```
 
-2. **XMLフォルダを変換**
+2. **DEMデータを変換**
    ```
-   XMLフォルダを stitch.bat にドラッグ&ドロップ
+   XML群の入ったフォルダを stitch.bat にドラッグ&ドロップ
    ```
+<img width="687" height="203" alt="image" src="https://github.com/user-attachments/assets/3f9bf9b4-acc6-4af4-a160-166a27fdfa2b" />
 
 ### 出力ファイル
 
