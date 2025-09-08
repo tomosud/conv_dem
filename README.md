@@ -56,7 +56,7 @@ XMLフォルダ を stitch.bat にドラッグ&ドロップ
 
 ## EXR Heightmap Viewer
 
-GitHub Pages対応のEXRハイトマップビュワーです。EXRファイルをドラッグ＆ドロップするだけで、3Dの地形メッシュとして表示できます。
+EXRハイトマップビュワーです。EXRファイルをドラッグ＆ドロップするだけで、3Dの地形メッシュとして表示できます。
 
 ### 機能
 
@@ -122,21 +122,6 @@ python -m http.server 8000
 ├── PLAN.md                 # 実装計画書
 └── README.md               # このファイル
 ```
-
-### GitHub Pagesでの公開
-
-このプロジェクトはGitHub Pagesで直接公開できます：
-
-1. リポジトリをGitHubにプッシュ
-2. Settings > Pages でソースをmainブランチに設定
-3. 提供されるURLでアクセス
-
-### サンプルファイル
-
-テスト用の巨大EXRファイル：
-- `viewer/FG-GML-523506-DEM1A-20250606_resized.exr`
-
----
 
 ## トラブルシューティング
 
