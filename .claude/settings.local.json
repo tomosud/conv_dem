@@ -7,7 +7,8 @@
       "Bash(\"D:\\KTN\\SourceAssets\\Tools\\Python\\env\\Python311.4\\python.exe\":*)",
       "Bash(dir:*)",
       "Bash(python:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(del index.js)"
     ],
     "deny": [],
     "ask": []

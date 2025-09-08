@@ -5,7 +5,7 @@ class HeightmapViewer {
         this.renderer = null;
         this.controls = null;
         this.heightmapMesh = null;
-        this.currentGridScale = 1; // 1 for 1m grid, 5 for 5m grid
+        this.currentGridScale = 5; // 1 for 1m grid, 5 for 5m grid
         this.heightData = null;
         this.originalWidth = 0;
         this.originalHeight = 0;
@@ -36,8 +36,8 @@ class HeightmapViewer {
             antialias: true 
         });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        this.renderer.shadowMap.enabled = false;
+        // this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
         // Add lights
         this.setupLighting();
@@ -64,7 +64,7 @@ class HeightmapViewer {
         // Directional light (sun)
         const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
         directionalLight.position.set(500, 1000, 300);
-        directionalLight.castShadow = true;
+        directionalLight.castShadow = false;
         directionalLight.shadow.mapSize.width = 2048;
         directionalLight.shadow.mapSize.height = 2048;
         directionalLight.shadow.camera.near = 0.5;
@@ -201,6 +201,14 @@ class HeightmapViewer {
         return new Promise((resolve) => {
             if (this.heightmapMesh) {
                 this.scene.remove(this.heightmapMesh);
+                // Properly dispose of geometry and material
+                if (this.heightmapMesh.geometry) {
+                    this.heightmapMesh.geometry.dispose();
+                }
+                if (this.heightmapMesh.material) {
+                    this.heightmapMesh.material.dispose();
+                }
+                this.heightmapMesh = null;
             }
 
             // Resample to 1024x1024 grid
@@ -235,11 +243,17 @@ class HeightmapViewer {
 
             geometry.attributes.position.needsUpdate = true;
             geometry.computeVertexNormals();
+            
+            // Remove UV coordinates to prevent texture conflicts
+            geometry.deleteAttribute('uv');
 
             // Create material with height-based coloring
             const material = new THREE.MeshLambertMaterial({
                 vertexColors: true,
-                side: THREE.DoubleSide
+                side: THREE.DoubleSide,
+                wireframe: false,
+                map: null,  // No texture map
+                transparent: false
             });
 
             // Add vertex colors based on height
@@ -250,8 +264,8 @@ class HeightmapViewer {
 
             // Create mesh
             this.heightmapMesh = new THREE.Mesh(geometry, material);
-            this.heightmapMesh.receiveShadow = true;
-            this.heightmapMesh.castShadow = true;
+            this.heightmapMesh.receiveShadow = false;
+            this.heightmapMesh.castShadow = false;
             
             this.scene.add(this.heightmapMesh);
 
