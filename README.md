@@ -4,6 +4,9 @@
 
 **[https://service.gsi.go.jp/kiban/app/](https://service.gsi.go.jp/kiban/app/)**
 
+数値標高モデルのDEMデータ（1ｍ/5ｍグリッド）のXML群からhightMapを書き出す変換ツール、およびビュワー。
+変換Toolはpythonで。ビュワーはwebビュワーとしてそのまま使用できます。
+
 ---
 
 ## 🌐 EXR Heightmap Viewer
