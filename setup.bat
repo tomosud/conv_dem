@@ -15,14 +15,24 @@ set SCRIPT_DIR=%SCRIPT_DIR:~0,-1%
 REM === Virtual environment directory ===
 set VENV_DIR=%SCRIPT_DIR%\venv
 
-REM === Python executable (system Python 3.11) ===
-set PY_EXE=D:\KTN\SourceAssets\Tools\Python\env\Python311.4\python.exe
+REM === Python executable (try relative path first, then system) ===
+set PY_EXE=%SCRIPT_DIR%\..\Python\env\Python311.4\python.exe
 
 REM === Check Python executable ===
 if not exist "%PY_EXE%" (
-    echo [ERROR] Python executable not found: %PY_EXE%
-    pause
-    exit /b 1
+    echo [WARN] Specific Python not found: %PY_EXE%
+    echo [INFO] Trying to use system Python...
+    
+    where python >nul 2>nul
+    if errorlevel 1 (
+        echo [ERROR] No Python found in system PATH either
+        echo [INFO] Please install Python or check the path in this script
+        pause
+        exit /b 1
+    )
+    
+    set PY_EXE=python
+    echo [INFO] Using system Python from PATH
 )
 
 REM === Create virtual environment ===
