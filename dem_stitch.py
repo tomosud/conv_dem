@@ -126,13 +126,13 @@ def parse_tile(xml_path, expected_cols=None, expected_rows=None):
             start_coords = grid_func.text.strip().split()
             start_x, start_y = int(start_coords[0]), int(start_coords[1])
             start_point = (start_x, start_y)
-            print(f"[INFO] StartPoint detected: {os.path.basename(xml_path)} -> ({start_x}, {start_y})")
+            # print(f"[INFO] StartPoint detected: {os.path.basename(xml_path)} -> ({start_x}, {start_y})")
 
         expected_size = rows * cols
         
         # 値の数が期待値と異なる場合の処理
         if vals.size != expected_size:
-            print(f"[INFO] Partial data detected: {os.path.basename(xml_path)} -> {vals.size}/{expected_size} values")
+            # print(f"[INFO] Partial data detected: {os.path.basename(xml_path)} -> {vals.size}/{expected_size} values")
             
             # 不足分を0で埋めた配列を作成
             full_vals = np.zeros(expected_size, dtype=np.float32)
@@ -331,7 +331,7 @@ def main():
 
     Ty = len(row_bands)
     Tx = len(col_bands)
-    print(f"[INFO] Tiling grid (Tx,Ty) = ({Tx},{Ty})  -> output shape = ({Ty*standard_rows}, {Tx*standard_cols})")
+    # print(f"[INFO] Tiling grid (Tx,Ty) = ({Tx},{Ty})  -> output shape = ({Ty*standard_rows}, {Tx*standard_cols})")
 
     H = Ty * standard_rows
     W = Tx * standard_cols
@@ -362,7 +362,7 @@ def main():
         out[y0:y1, x0:x1] = tile
         placed += 1
 
-    print(f"[INFO] placed tiles: {placed}/{len(tiles)}")
+    # print(f"[INFO] placed tiles: {placed}/{len(tiles)}")
 
     # 補間前の欠損マスクを作成（0=欠損、1=有効データ）
     original_mask = (out != 0.0).astype(np.float32)

@@ -15,6 +15,9 @@ dem_stitch_multi.py
 
 import sys, argparse, tempfile, shutil, zipfile, datetime, math
 from pathlib import Path
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from functools import partial
+import os
 
 import numpy as np
 import OpenEXR, Imath
@@ -57,17 +60,26 @@ def compute_scale_x_from_latlon(lat_min, lat_max, lon_min, lon_max, rows, cols):
 
 def resize_width_linear(img, new_w):
     """
-    画像の横幅のみをリニア補間でリサイズ
+    画像の横幅のみをリニア補間でリサイズ（高速化版）
     """
     H, W = img.shape
     if new_w == W:
         return img.copy()
     
+    # ベクトル化された高速リサイズ
     x_old = np.linspace(0.0, 1.0, W, endpoint=True)
     x_new = np.linspace(0.0, 1.0, new_w, endpoint=True)
+    
+    # 全行を一度に補間（メモリ効率とのバランスを考慮）
+    chunk_size = min(H, 1000)  # メモリ使用量制限
     out = np.empty((H, new_w), dtype=img.dtype)
-    for y in range(H):
-        out[y] = np.interp(x_new, x_old, img[y])
+    
+    for start in range(0, H, chunk_size):
+        end = min(start + chunk_size, H)
+        chunk = img[start:end]
+        for i, row in enumerate(chunk):
+            out[start + i] = np.interp(x_new, x_old, row)
+    
     return out
 
 # ------------------------------------------------------------
@@ -94,6 +106,7 @@ def looks_like_dem_xml_head(text_head: str) -> bool:
 # ZIP の選択的展開：必要な .xml と 内包 .zip のみ
 # ------------------------------------------------------------
 def selective_extract_zip(zip_path: Path, out_dir: Path, sniff_kb: int = 8):
+    extracted_count = 0
     with zipfile.ZipFile(zip_path, 'r') as z:
         for info in z.infolist():
             name = info.filename
@@ -101,6 +114,7 @@ def selective_extract_zip(zip_path: Path, out_dir: Path, sniff_kb: int = 8):
             # 内包zipは抽出（後で再帰）
             if low.endswith(".zip"):
                 z.extract(info, path=out_dir)
+                extracted_count += 1
                 continue
             # xml名で一次判定
             if looks_like_dem_xml_name(low):
@@ -109,22 +123,37 @@ def selective_extract_zip(zip_path: Path, out_dir: Path, sniff_kb: int = 8):
                     head = f.read(sniff_kb * 1024).decode("utf-8", errors="ignore")
                 if looks_like_dem_xml_head(head):
                     z.extract(info, path=out_dir)
+                    extracted_count += 1
+    return extracted_count
+
+def extract_zip_worker(args):
+    """ZIP展開のワーカー関数"""
+    zip_path, out_dir = args
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        count = selective_extract_zip(zip_path, out_dir)
+        return str(out_dir), count, None
+    except Exception as e:
+        return None, 0, f"{zip_path.name}: {e}"
 
 # ------------------------------------------------------------
 # 入力群から DEM XML を収集（テンポラリ使用）
 # ------------------------------------------------------------
-def collect_dem_xmls_from_inputs(inputs):
+def collect_dem_xmls_from_inputs(inputs, max_workers=None):
+    if max_workers is None:
+        max_workers = min(4, os.cpu_count() or 2)  # ZIP展開はI/O律速なので控えめ
+    
     tmp_root = tempfile.TemporaryDirectory()
     tmp_dir = Path(tmp_root.name)
     work_dirs = []
 
+    # 初期展開（並列処理）
+    zip_jobs = []
     for p in inputs:
         p = Path(p)
         if p.is_file() and p.suffix.lower() == ".zip":
             out = tmp_dir / p.stem
-            out.mkdir(parents=True, exist_ok=True)
-            selective_extract_zip(p, out)
-            work_dirs.append(out)
+            zip_jobs.append((p, out))
         elif p.is_dir():
             out = tmp_dir / p.name
             if out.exists():
@@ -134,22 +163,58 @@ def collect_dem_xmls_from_inputs(inputs):
         else:
             print(f"[WARN] Unsupported path: {p}")
 
-    # 内包ZIPを再帰展開（zipが無くなるまで）
-    changed = True
-    while changed:
-        changed = False
-        for base in list(work_dirs):
-            for inner_zip in list(base.rglob("*.zip")):
-                sub = inner_zip.with_suffix("")
-                sub.mkdir(exist_ok=True)
-                selective_extract_zip(inner_zip, sub)
-                try:
-                    inner_zip.unlink()
-                except Exception:
-                    pass
-                work_dirs.append(sub)
-                changed = True
+    if zip_jobs:
+        print(f"[INFO] Extracting {len(zip_jobs)} ZIP files...")
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            results = list(executor.map(extract_zip_worker, zip_jobs))
+        
+        for result_dir, count, error in results:
+            if error:
+                print(f"[WARN] {error}")
+            else:
+                work_dirs.append(Path(result_dir))
+                if count > 0:
+                    print(f"[INFO] Extracted {count} files from {Path(result_dir).name}")
 
+    # 内包ZIPを再帰展開
+    iteration = 1
+    while True:
+        inner_zips = []
+        for base in work_dirs:
+            inner_zips.extend(list(base.rglob("*.zip")))
+        
+        if not inner_zips:
+            break
+            
+        print(f"[INFO] Recursion {iteration}: processing {len(inner_zips)} inner ZIPs...")
+        
+        zip_jobs = []
+        for inner_zip in inner_zips:
+            sub = inner_zip.with_suffix("")
+            zip_jobs.append((inner_zip, sub))
+        
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            results = list(executor.map(extract_zip_worker, zip_jobs))
+        
+        for result_dir, count, error in results:
+            if error:
+                print(f"[WARN] {error}")
+            else:
+                work_dirs.append(Path(result_dir))
+        
+        # 元のZIPファイルを削除
+        for inner_zip in inner_zips:
+            try:
+                inner_zip.unlink()
+            except Exception:
+                pass
+        
+        iteration += 1
+        if iteration > 10:  # 無限ループ防止
+            print("[WARN] Too many recursion levels, stopping")
+            break
+
+    # XML収集
     xmls = []
     for d in work_dirs:
         for x in d.rglob("*.xml"):
@@ -162,8 +227,8 @@ def collect_dem_xmls_from_inputs(inputs):
                 if looks_like_dem_xml_head(head):
                     xmls.append(x)
 
-    print(f"[INFO] collected DEM XML: {len(xmls)} files")
-    return xmls, tmp_root  # tmp_root は呼び出し側のスコープが保持している間、生存
+    print(f"[INFO] Collected {len(xmls)} DEM XML files")
+    return xmls, tmp_root
 
 # ------------------------------------------------------------
 # 既存 parse_tile() を用いて1XML→タイル辞書に変換（NaN→0）
@@ -175,6 +240,51 @@ def parse_one(xml_path: Path):
     arr = np.asarray(t["data"], dtype=np.float32)
     t["data2d"] = np.nan_to_num(arr, nan=0.0)  # 欠損は0
     return t
+
+def parse_one_worker(xml_path_str):
+    """並列処理用のワーカー関数"""
+    try:
+        xml_path = Path(xml_path_str)
+        return parse_one(xml_path), None
+    except Exception as e:
+        return None, f"{Path(xml_path_str).name}: {e}"
+
+def parse_tiles_parallel(xml_paths, max_workers=None):
+    """XMLファイルを並列処理でパース"""
+    if max_workers is None:
+        max_workers = min(len(xml_paths), os.cpu_count() or 4)
+    
+    tiles = []
+    errors = []
+    
+    print(f"[INFO] Parsing {len(xml_paths)} XML files using {max_workers} workers...")
+    
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(parse_one_worker, str(xml)): xml for xml in xml_paths}
+        
+        completed = 0
+        for future in as_completed(futures):
+            completed += 1
+            xml_path = futures[future]
+            tile, error = future.result()
+            
+            if tile:
+                tiles.append(tile)
+            else:
+                errors.append(error)
+            
+            # プログレス表示（10%刻み）
+            progress = (completed * 100) // len(xml_paths)
+            if completed % max(1, len(xml_paths) // 10) == 0 or completed == len(xml_paths):
+                print(f"[PROGRESS] {completed}/{len(xml_paths)} ({progress}%) parsed")
+    
+    if errors:
+        print(f"[WARN] Skipped {len(errors)} files with errors")
+        if len(errors) <= 5:  # エラーが少ない場合のみ詳細表示
+            for err in errors:
+                print(f"[WARN] {err}")
+    
+    return tiles
 
 # ------------------------------------------------------------
 # タイル結合（行=北→南, 列=西→東）
@@ -224,25 +334,22 @@ def main():
     ap.add_argument("--out", default=None, help="出力ファイル名（拡張子不要）")
     ap.add_argument("--outdir", default=None, help="出力先ディレクトリ（省略時: 最初の入力の親）")
     ap.add_argument("--round", type=int, default=10, help="タイル境界丸め桁（既定=10）")
+    ap.add_argument("--workers", type=int, default=None, help="並列処理ワーカー数（省略時: 自動）")
     args = ap.parse_args()
 
+    print(f"[INFO] Processing {len(args.inputs)} input(s)...")
     inputs = [Path(p) for p in args.inputs]
-    xmls, tmp_keeper = collect_dem_xmls_from_inputs(inputs)
+    xmls, tmp_keeper = collect_dem_xmls_from_inputs(inputs, max_workers=args.workers)
     if not xmls:
-        print("[ERROR] DEM XML が見つかりませんでした。")
+        print("[ERROR] No DEM XML files found")
         return 1
 
-    tiles = []
-    for x in xmls:
-        try:
-            tiles.append(parse_one(x))
-        except Exception as e:
-            print(f"[WARN] skip {x.name}: {e}")
-
+    tiles = parse_tiles_parallel(xmls, max_workers=args.workers)
     if not tiles:
-        print("[ERROR] 有効なタイルがありません。")
+        print("[ERROR] No valid tiles processed")
         return 1
 
+    print(f"[INFO] Building mosaic from {len(tiles)} tiles...")
     mosaic = build_mosaic(tiles, round_decimals=args.round)
 
     # 出力先
@@ -271,31 +378,27 @@ def main():
     
     # スケール係数を計算
     scale_x = compute_scale_x_from_latlon(all_lat_min, all_lat_max, all_lon_min, all_lon_max, H, W)
-    print(f"[INFO] Computed scale_x = {scale_x:.6f}")
-    
-    # スケール係数の逆数を使用（1.0/scale_x）
     corrected_scale_x = 1.0 / scale_x
-    print(f"[INFO] Corrected scale_x (1.0/scale_x) = {corrected_scale_x:.6f}")
-    
-    # リサイズ後の横幅を計算
     new_w = max(1, int(round(W * corrected_scale_x)))
-    print(f"[INFO] Resizing width from {W} to {new_w}")
+    
+    print(f"[INFO] Aspect correction: {W} -> {new_w} pixels (scale={corrected_scale_x:.4f})")
 
     # OpenEXRで保存（オリジナル）
+    print("[INFO] Saving original EXR...")
     out_path = out_dir / f"{out_base}.exr"
     save_exr_float32_R(out_path, mosaic)
-    print(f"[INFO] saved EXR: {out_path}")
     
     # リサイズ処理
+    print("[INFO] Applying aspect correction...")
     mosaic_resized = resize_width_linear(mosaic, new_w)
     
     # OpenEXRで保存（リサイズ後）
+    print("[INFO] Saving corrected EXR...")
     out_resized_path = out_dir / f"{out_base}_resized.exr"
     save_exr_float32_R(out_resized_path, mosaic_resized)
-    print(f"[INFO] saved resized EXR: {out_resized_path}")
     
-    print(f"[OK] Original: {out_path}  shape={mosaic.shape}")
-    print(f"[OK] Resized:  {out_resized_path}  shape={mosaic_resized.shape}")
+    print(f"[COMPLETE] Original: {out_path} ({mosaic.shape})")
+    print(f"[COMPLETE] Corrected: {out_resized_path} ({mosaic_resized.shape})")
     return 0
 
 if __name__ == "__main__":
