@@ -13,7 +13,7 @@ dem_stitch_multi.py
 - 出力名: 指定が無ければ stitch_YYYYmmdd_HHMM.exr
 """
 
-import sys, argparse, tempfile, shutil, zipfile, datetime
+import sys, argparse, tempfile, shutil, zipfile, datetime, math
 from pathlib import Path
 
 import numpy as np
@@ -37,6 +37,38 @@ def save_exr_float32_R(path, arr: np.ndarray):
     exr = OpenEXR.OutputFile(str(path), header)
     exr.writePixels({'R': arr.astype('float32').tobytes()})
     exr.close()
+
+# ------------------------------------------------------------
+# 緯度経度からアスペクト比補正用スケール係数を計算
+# ------------------------------------------------------------
+def compute_scale_x_from_latlon(lat_min, lat_max, lon_min, lon_max, rows, cols):
+    """
+    緯度経度範囲から横方向のスケール係数を計算
+    縦解像度はそのまま、横を拡大してアスペクト比を補正
+    """
+    lat_span = lat_max - lat_min
+    lon_span = lon_max - lon_min
+    dlat = lat_span / rows
+    dlon = lon_span / cols
+    phi = 0.5 * (lat_min + lat_max)  # 中央緯度
+    # 横方向のみ拡大する係数（縦=1.0）
+    scale_x = (dlat / dlon) * (1.0 / math.cos(math.radians(phi)))
+    return scale_x
+
+def resize_width_linear(img, new_w):
+    """
+    画像の横幅のみをリニア補間でリサイズ
+    """
+    H, W = img.shape
+    if new_w == W:
+        return img.copy()
+    
+    x_old = np.linspace(0.0, 1.0, W, endpoint=True)
+    x_new = np.linspace(0.0, 1.0, new_w, endpoint=True)
+    out = np.empty((H, new_w), dtype=img.dtype)
+    for y in range(H):
+        out[y] = np.interp(x_new, x_old, img[y])
+    return out
 
 # ------------------------------------------------------------
 # DEM XML 判定（軽量）
@@ -229,9 +261,41 @@ def main():
         now = datetime.datetime.now().strftime("%Y%m%d_%H%M")
         out_base = f"stitch_{now}"
 
+    # 緯度経度範囲を計算
+    all_lat_min = min(t["lat_min"] for t in tiles)
+    all_lat_max = max(t["lat_max"] for t in tiles)
+    all_lon_min = min(t["lon_min"] for t in tiles)
+    all_lon_max = max(t["lon_max"] for t in tiles)
+    
+    H, W = mosaic.shape
+    
+    # スケール係数を計算
+    scale_x = compute_scale_x_from_latlon(all_lat_min, all_lat_max, all_lon_min, all_lon_max, H, W)
+    print(f"[INFO] Computed scale_x = {scale_x:.6f}")
+    
+    # スケール係数の逆数を使用（1.0/scale_x）
+    corrected_scale_x = 1.0 / scale_x
+    print(f"[INFO] Corrected scale_x (1.0/scale_x) = {corrected_scale_x:.6f}")
+    
+    # リサイズ後の横幅を計算
+    new_w = max(1, int(round(W * corrected_scale_x)))
+    print(f"[INFO] Resizing width from {W} to {new_w}")
+
+    # OpenEXRで保存（オリジナル）
     out_path = out_dir / f"{out_base}.exr"
     save_exr_float32_R(out_path, mosaic)
-    print(f"[OK] wrote {out_path}  shape={mosaic.shape}")
+    print(f"[INFO] saved EXR: {out_path}")
+    
+    # リサイズ処理
+    mosaic_resized = resize_width_linear(mosaic, new_w)
+    
+    # OpenEXRで保存（リサイズ後）
+    out_resized_path = out_dir / f"{out_base}_resized.exr"
+    save_exr_float32_R(out_resized_path, mosaic_resized)
+    print(f"[INFO] saved resized EXR: {out_resized_path}")
+    
+    print(f"[OK] Original: {out_path}  shape={mosaic.shape}")
+    print(f"[OK] Resized:  {out_resized_path}  shape={mosaic_resized.shape}")
     return 0
 
 if __name__ == "__main__":
