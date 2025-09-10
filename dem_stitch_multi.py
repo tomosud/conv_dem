@@ -13,7 +13,7 @@ dem_stitch_multi.py
 - 出力名: 指定が無ければ stitch_YYYYmmdd_HHMM.exr
 """
 
-import sys, argparse, tempfile, shutil, zipfile, datetime, math
+import sys, argparse, tempfile, shutil, zipfile, datetime, math, time
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
@@ -140,6 +140,7 @@ def extract_zip_worker(args):
 # 入力群から DEM XML を収集（テンポラリ使用）
 # ------------------------------------------------------------
 def collect_dem_xmls_from_inputs(inputs, max_workers=None):
+    start_time = time.time()
     if max_workers is None:
         max_workers = min(4, os.cpu_count() or 2)  # ZIP展開はI/O律速なので控えめ
     
@@ -148,6 +149,7 @@ def collect_dem_xmls_from_inputs(inputs, max_workers=None):
     work_dirs = []
 
     # 初期展開（並列処理）
+    extract_start = time.time()
     zip_jobs = []
     for p in inputs:
         p = Path(p)
@@ -175,8 +177,12 @@ def collect_dem_xmls_from_inputs(inputs, max_workers=None):
                 work_dirs.append(Path(result_dir))
                 if count > 0:
                     print(f"[INFO] Extracted {count} files from {Path(result_dir).name}")
+    
+    extract_time = time.time() - extract_start
+    print(f"[TIME] Initial ZIP extraction: {extract_time:.2f}s")
 
     # 内包ZIPを再帰展開
+    recursion_start = time.time()
     iteration = 1
     while True:
         inner_zips = []
@@ -213,8 +219,13 @@ def collect_dem_xmls_from_inputs(inputs, max_workers=None):
         if iteration > 10:  # 無限ループ防止
             print("[WARN] Too many recursion levels, stopping")
             break
+    
+    recursion_time = time.time() - recursion_start
+    if recursion_time > 0.1:
+        print(f"[TIME] Recursive ZIP extraction: {recursion_time:.2f}s")
 
     # XML収集
+    collection_start = time.time()
     xmls = []
     for d in work_dirs:
         for x in d.rglob("*.xml"):
@@ -226,7 +237,12 @@ def collect_dem_xmls_from_inputs(inputs, max_workers=None):
                     continue
                 if looks_like_dem_xml_head(head):
                     xmls.append(x)
-
+    
+    collection_time = time.time() - collection_start
+    total_time = time.time() - start_time
+    
+    print(f"[TIME] XML collection: {collection_time:.2f}s")
+    print(f"[TIME] Total file preparation: {total_time:.2f}s")
     print(f"[INFO] Collected {len(xmls)} DEM XML files")
     return xmls, tmp_root
 
@@ -251,6 +267,7 @@ def parse_one_worker(xml_path_str):
 
 def parse_tiles_parallel(xml_paths, max_workers=None):
     """XMLファイルを並列処理でパース"""
+    start_time = time.time()
     if max_workers is None:
         max_workers = min(len(xml_paths), os.cpu_count() or 4)
     
@@ -276,7 +293,12 @@ def parse_tiles_parallel(xml_paths, max_workers=None):
             # プログレス表示（10%刻み）
             progress = (completed * 100) // len(xml_paths)
             if completed % max(1, len(xml_paths) // 10) == 0 or completed == len(xml_paths):
-                print(f"[PROGRESS] {completed}/{len(xml_paths)} ({progress}%) parsed")
+                elapsed = time.time() - start_time
+                rate = completed / elapsed if elapsed > 0 else 0
+                print(f"[PROGRESS] {completed}/{len(xml_paths)} ({progress}%) - {rate:.1f} files/sec")
+    
+    parse_time = time.time() - start_time
+    print(f"[TIME] XML parsing: {parse_time:.2f}s ({len(tiles)} tiles)")
     
     if errors:
         print(f"[WARN] Skipped {len(errors)} files with errors")
@@ -293,6 +315,8 @@ def _unique_sorted(arr, decimals=10, reverse=False):
     return sorted({round(a, decimals) for a in arr}, reverse=reverse)
 
 def build_mosaic(tiles, round_decimals=10):
+    start_time = time.time()
+    
     # キー抽出（代表点: 北端lat_max / 西端lon_min）
     lat_keys = [t["lat_max"] for t in tiles]
     lon_keys = [t["lon_min"] for t in tiles]
@@ -305,9 +329,17 @@ def build_mosaic(tiles, round_decimals=10):
 
     total_h = sum(row_heights.values())
     total_w = sum(col_widths.values())
+    
+    print(f"[INFO] Mosaic size: {total_h} x {total_w} pixels")
+    
+    # メモリ割り当て時間測定
+    alloc_start = time.time()
     mosaic = np.zeros((total_h, total_w), dtype=np.float32)  # 欠損=0
+    alloc_time = time.time() - alloc_start
+    print(f"[TIME] Memory allocation: {alloc_time:.2f}s")
 
-    # オフセット
+    # オフセット計算
+    calc_start = time.time()
     y_off, acc = {}, 0
     for rk in row_bands:
         y_off[rk] = acc
@@ -316,19 +348,27 @@ def build_mosaic(tiles, round_decimals=10):
     for ck in col_bands:
         x_off[ck] = acc
         acc += col_widths[ck]
+    calc_time = time.time() - calc_start
 
     # 配置（重複は後勝ち）
+    place_start = time.time()
     for t in tiles:
         rk = round(t["lat_max"], round_decimals)
         ck = round(t["lon_min"],  round_decimals)
         y0, x0 = y_off[rk], x_off[ck]
         h, w = t["rows"], t["cols"]
         mosaic[y0:y0+h, x0:x0+w] = t["data2d"]
+    place_time = time.time() - place_start
+    
+    total_time = time.time() - start_time
+    print(f"[TIME] Mosaic building: {total_time:.2f}s (calc: {calc_time:.3f}s, place: {place_time:.2f}s)")
 
     return mosaic
 
 # ------------------------------------------------------------
 def main():
+    total_start = time.time()
+    
     ap = argparse.ArgumentParser()
     ap.add_argument("inputs", nargs="+", help="ZIPまたはフォルダ（複数可）")
     ap.add_argument("--out", default=None, help="出力ファイル名（拡張子不要）")
@@ -353,6 +393,7 @@ def main():
     mosaic = build_mosaic(tiles, round_decimals=args.round)
 
     # 出力先
+    output_start = time.time()
     if args.outdir:
         out_dir = Path(args.outdir)
     else:
@@ -369,6 +410,7 @@ def main():
         out_base = f"stitch_{now}"
 
     # 緯度経度範囲を計算
+    calc_start = time.time()
     all_lat_min = min(t["lat_min"] for t in tiles)
     all_lat_max = max(t["lat_max"] for t in tiles)
     all_lon_min = min(t["lon_min"] for t in tiles)
@@ -380,23 +422,39 @@ def main():
     scale_x = compute_scale_x_from_latlon(all_lat_min, all_lat_max, all_lon_min, all_lon_max, H, W)
     corrected_scale_x = 1.0 / scale_x
     new_w = max(1, int(round(W * corrected_scale_x)))
+    calc_time = time.time() - calc_start
     
     print(f"[INFO] Aspect correction: {W} -> {new_w} pixels (scale={corrected_scale_x:.4f})")
+    print(f"[TIME] Scale calculation: {calc_time:.3f}s")
 
     # OpenEXRで保存（オリジナル）
+    save_start = time.time()
     print("[INFO] Saving original EXR...")
     out_path = out_dir / f"{out_base}.exr"
     save_exr_float32_R(out_path, mosaic)
+    save_time = time.time() - save_start
+    print(f"[TIME] Original EXR save: {save_time:.2f}s")
     
     # リサイズ処理
+    resize_start = time.time()
     print("[INFO] Applying aspect correction...")
     mosaic_resized = resize_width_linear(mosaic, new_w)
+    resize_time = time.time() - resize_start
+    print(f"[TIME] Aspect correction: {resize_time:.2f}s")
     
     # OpenEXRで保存（リサイズ後）
+    save2_start = time.time()
     print("[INFO] Saving corrected EXR...")
     out_resized_path = out_dir / f"{out_base}_resized.exr"
     save_exr_float32_R(out_resized_path, mosaic_resized)
+    save2_time = time.time() - save2_start
+    print(f"[TIME] Corrected EXR save: {save2_time:.2f}s")
     
+    output_time = time.time() - output_start
+    total_time = time.time() - total_start
+    
+    print(f"[TIME] Total output processing: {output_time:.2f}s")
+    print(f"[TIME] TOTAL EXECUTION: {total_time:.2f}s")
     print(f"[COMPLETE] Original: {out_path} ({mosaic.shape})")
     print(f"[COMPLETE] Corrected: {out_resized_path} ({mosaic_resized.shape})")
     return 0
