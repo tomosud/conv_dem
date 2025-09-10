@@ -21,12 +21,12 @@ class HeightmapViewer {
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x87CEEB);
 
-        // Create camera
+        // Create camera with extended far plane
         this.camera = new THREE.PerspectiveCamera(
             75, 
             window.innerWidth / window.innerHeight, 
             0.1, 
-            10000
+            100000  // Extended far clipping plane
         );
         this.camera.position.set(0, 500, 500);
 
@@ -46,8 +46,9 @@ class HeightmapViewer {
         this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.05;
-        this.controls.maxDistance = 4000;
-        this.controls.minDistance = 10;
+        // Initial limits, will be updated when terrain is loaded
+        this.controls.maxDistance = 10000;
+        this.controls.minDistance = 1;
 
         // Start render loop
         this.animate();
@@ -170,6 +171,7 @@ class HeightmapViewer {
             document.getElementById('dropZone').classList.add('hidden');
             document.getElementById('controls').style.display = 'block';
             document.getElementById('info').style.display = 'block';
+            document.getElementById('terrainInfo').style.display = 'block';
             
             this.showLoading(false);
             
@@ -211,23 +213,36 @@ class HeightmapViewer {
                 this.heightmapMesh = null;
             }
 
-            // Resample to 1024x1024 grid
-            const targetSize = 1024;
+            // Calculate optimal mesh dimensions based on input resolution and grid scale
+            const maxVertices = 1024; // Maximum vertices per dimension for performance
             const aspect = this.originalWidth / this.originalHeight;
             
+            // Calculate mesh dimensions in vertices (grid points)
             let meshWidth, meshHeight;
+            
+            // Determine grid dimensions based on current grid scale and original resolution
+            // Each pixel represents this.currentGridScale meters
+            const terrainWidthMeters = this.originalWidth * this.currentGridScale;
+            const terrainHeightMeters = this.originalHeight * this.currentGridScale;
+            
+            // Calculate vertices needed to maintain proper resolution
+            // But limit to maxVertices for performance
             if (aspect >= 1) {
-                meshWidth = targetSize;
-                meshHeight = Math.round(targetSize / aspect);
+                meshWidth = Math.min(this.originalWidth, maxVertices);
+                meshHeight = Math.min(Math.round(meshWidth / aspect), maxVertices);
             } else {
-                meshWidth = Math.round(targetSize * aspect);
-                meshHeight = targetSize;
+                meshHeight = Math.min(this.originalHeight, maxVertices);
+                meshWidth = Math.min(Math.round(meshHeight * aspect), maxVertices);
             }
+            
+            // Ensure minimum resolution
+            meshWidth = Math.max(meshWidth, 64);
+            meshHeight = Math.max(meshHeight, 64);
 
-            // Create geometry
+            // Create geometry with actual terrain dimensions in meters
             const geometry = new THREE.PlaneGeometry(
-                meshWidth * this.currentGridScale,
-                meshHeight * this.currentGridScale,
+                terrainWidthMeters,
+                terrainHeightMeters,
                 meshWidth - 1,
                 meshHeight - 1
             );
@@ -271,6 +286,8 @@ class HeightmapViewer {
 
             // Update camera position based on data bounds
             this.updateCameraPosition(resampledHeights);
+            
+            console.log(`Mesh generated: ${meshWidth}x${meshHeight} vertices, terrain: ${terrainWidthMeters}x${terrainHeightMeters}m, grid scale: ${this.currentGridScale}m`);
 
             resolve();
         });
@@ -349,14 +366,58 @@ class HeightmapViewer {
         }
         const heightRange = maxHeight - minHeight;
         
-        // Position camera based on terrain size
-        const distance = Math.max(this.originalWidth, this.originalHeight, heightRange * 2);
-        this.camera.position.set(distance * 0.5, maxHeight + distance * 0.3, distance * 0.5);
-        this.camera.lookAt(0, (minHeight + maxHeight) / 2, 0);
+        // Calculate actual terrain dimensions in meters
+        const terrainWidthMeters = this.originalWidth * this.currentGridScale;
+        const terrainHeightMeters = this.originalHeight * this.currentGridScale;
+        const terrainDiagonal = Math.sqrt(terrainWidthMeters * terrainWidthMeters + terrainHeightMeters * terrainHeightMeters);
         
-        // Update controls target
-        this.controls.target.set(0, (minHeight + maxHeight) / 2, 0);
+        // Position camera based on actual terrain size in meters
+        // Use the larger of terrain diagonal or height range * 3 for proper viewing distance
+        const viewDistance = Math.max(terrainDiagonal * 0.8, heightRange * 3, 500);
+        const elevationOffset = Math.max(heightRange * 0.5, viewDistance * 0.2);
+        
+        // Position camera at 45 degree angle for good overview
+        const cameraX = terrainWidthMeters * 0.3;
+        const cameraY = maxHeight + elevationOffset;
+        const cameraZ = terrainHeightMeters * 0.3;
+        
+        this.camera.position.set(cameraX, cameraY, cameraZ);
+        
+        // Look at center of terrain at average height
+        const terrainCenterHeight = (minHeight + maxHeight) / 2;
+        this.camera.lookAt(0, terrainCenterHeight, 0);
+        
+        // Update controls target to terrain center
+        this.controls.target.set(0, terrainCenterHeight, 0);
+        
+        // Set appropriate control limits based on terrain size
+        this.controls.maxDistance = Math.min(viewDistance * 5, 50000);  // Increased max distance, but keep within far plane
+        this.controls.minDistance = Math.max(heightRange * 0.1, 10);
+        
         this.controls.update();
+        
+        console.log(`Camera positioned: terrain ${terrainWidthMeters}x${terrainHeightMeters}m, height range ${heightRange.toFixed(1)}m, distance ${viewDistance.toFixed(1)}m`);
+        
+        // Update terrain info display
+        this.updateTerrainInfoDisplay(minHeight, maxHeight);
+    }
+
+    updateTerrainInfoDisplay(minHeight, maxHeight) {
+        const terrainWidthMeters = this.originalWidth * this.currentGridScale;
+        const terrainHeightMeters = this.originalHeight * this.currentGridScale;
+        const heightRange = maxHeight - minHeight;
+        
+        // Update terrain size display
+        document.getElementById('terrainSize').textContent = 
+            `地形サイズ: ${terrainWidthMeters.toLocaleString()}m × ${terrainHeightMeters.toLocaleString()}m`;
+        
+        // Update height range display
+        document.getElementById('heightRange').textContent = 
+            `標高: ${minHeight.toFixed(1)}m ～ ${maxHeight.toFixed(1)}m (範囲: ${heightRange.toFixed(1)}m)`;
+        
+        // Update grid scale display
+        document.getElementById('gridScale').textContent = 
+            `グリッド: ${this.currentGridScale}m (${this.originalWidth} × ${this.originalHeight} ピクセル)`;
     }
 
     setGridScale(scale) {
@@ -374,7 +435,23 @@ class HeightmapViewer {
 
     resetView() {
         if (this.heightData) {
-            const heights = this.resampleHeightData(1024, Math.round(1024 / (this.originalWidth / this.originalHeight)));
+            // Recalculate mesh dimensions same as in generateHeightmapMesh
+            const maxVertices = 1024;
+            const aspect = this.originalWidth / this.originalHeight;
+            let meshWidth, meshHeight;
+            
+            if (aspect >= 1) {
+                meshWidth = Math.min(this.originalWidth, maxVertices);
+                meshHeight = Math.min(Math.round(meshWidth / aspect), maxVertices);
+            } else {
+                meshHeight = Math.min(this.originalHeight, maxVertices);
+                meshWidth = Math.min(Math.round(meshHeight * aspect), maxVertices);
+            }
+            
+            meshWidth = Math.max(meshWidth, 64);
+            meshHeight = Math.max(meshHeight, 64);
+            
+            const heights = this.resampleHeightData(meshWidth, meshHeight);
             this.updateCameraPosition(heights);
         }
     }

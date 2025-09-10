@@ -173,6 +173,32 @@
             backdrop-filter: blur(10px);
             display: none;
         }
+
+        #terrainInfo {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+            display: none;
+        }
+
+        .info-panel {
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 10px;
+            color: white;
+            backdrop-filter: blur(10px);
+            font-size: 14px;
+            min-width: 200px;
+        }
+
+        .info-panel div {
+            margin-bottom: 8px;
+        }
+
+        .info-panel div:last-child {
+            margin-bottom: 0;
+        }
     </style>
 </head>
 <body>
@@ -208,6 +234,14 @@
             <div>マウス: 回転</div>
             <div>ホイール: ズーム</div>
             <div>右クリック: パン</div>
+        </div>
+
+        <div id="terrainInfo">
+            <div class="info-panel">
+                <div id="terrainSize">地形サイズ: --</div>
+                <div id="heightRange">標高: --</div>
+                <div id="gridScale">グリッド: --</div>
+            </div>
         </div>
 
         <input type="file" id="fileInput" accept=".exr" />
