@@ -214,7 +214,7 @@ class HeightmapViewer {
             }
 
             // Calculate optimal mesh dimensions based on input resolution and grid scale
-            const maxVertices = 1024; // Maximum vertices per dimension for performance
+            const maxVertices = 2048; // Maximum vertices per dimension for performance
             const aspect = this.originalWidth / this.originalHeight;
             
             // Calculate mesh dimensions in vertices (grid points)
@@ -436,7 +436,7 @@ class HeightmapViewer {
     resetView() {
         if (this.heightData) {
             // Recalculate mesh dimensions same as in generateHeightmapMesh
-            const maxVertices = 1024;
+            const maxVertices = 2048;
             const aspect = this.originalWidth / this.originalHeight;
             let meshWidth, meshHeight;
             
