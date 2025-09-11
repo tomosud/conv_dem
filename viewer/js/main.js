@@ -301,7 +301,8 @@ class HeightmapViewer {
         for (let y = 0; y < targetHeight; y++) {
             for (let x = 0; x < targetWidth; x++) {
                 const srcX = Math.floor(x * scaleX);
-                const srcY = Math.floor(y * scaleY);
+                // Flip Y coordinate to correct north-south orientation
+                const srcY = Math.floor((targetHeight - 1 - y) * scaleY);
                 const srcIndex = (srcY * this.originalWidth + srcX);
                 
                 const targetIndex = y * targetWidth + x;
